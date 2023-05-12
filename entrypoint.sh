@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+
+if [ -z "$HADOOP_MODE" ]; then
+    echo "HADOOP_MODE variable is not set. Exiting..."
+    exit 1
+fi
+
+function addProperty () {
+  local path=$1
+  local name=$2
+  local value=$3
+
+  local entry="<property>\n\t<name>$name</name>\n\t<value>$value</value>\n</property>"
+  local escapedEntry
+  escapedEntry=$(echo "$entry" | sed 's/\//\\\//g')
+  sed -i  "/<\/configuration>/ s/.*/${escapedEntry}\n&/" "$path"
+}
+
+# 通过env_file来设置变量 参数: 要配置的文件路径 要配置的模块 env环境变量前缀
+function configure() {
+  local path=$1 #文件路径
+  local module=$2 #修改的是哪一个模块 core hdfs yarn hive等
+  local envPrefix=$3 #修改的值
+
+  local var
+  local value
+  
+  echo "Configuring $module"
+  for c in $(printenv | perl -sne 'print "$1 " if m/^${envPrefix}_(.+?)=.*/' -- -envPrefix="$envPrefix"); do
+    name=$(echo "${c}" | perl -pe 's/___/-/g; s/__/_/g; s/_/./g')
+        var="${envPrefix}_${c}"
+        value=${!var}
+        echo " - Setting $name=$value"
+        addProperty "$path" "$name" "$value"
+  done
+
+}
+
+export CORE_CONF_fs_defaultFS=${CORE_CONF_fs_defaultFS:-hdfs://$(hostname -f):8020}
+
+# dataNode
+readonly NODE
+  NODE=node-$(hostname -i | awk -F "." '{print $NF}' | awk '{print $1-2}')
+readonly HADOOP_CONF_DIR=/etc/hadoop
+readonly HDFS_CACHE_DIR=file://$HADOOP_DATA_DIR/$NODE
+
+# 配置 core-site.xml
+configure $HADOOP_CONF_DIR/core-site.xml core CORE_CONF
+
+# 配置hdfs-site.xml 这里有个问题,如果env中配置了同样的参数 就会重复
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml hadoop.tmp.dir $HADOOP_CONF_DIR # hadoop.tmp.dir namenode元数据信息
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.name.dir "$HDFS_CACHE_DIR"/name
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.checkpoint.dir "$HDFS_CACHE_DIR"/namesecondary
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.datanode.data.dir "$HDFS_CACHE_DIR"/data
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.webhdfs.enabled true
+addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.permissions.enabled false
+
+# 配置yarn-site.xml
+addProperty $HADOOP_CONF_DIR/yarn-site.xml yarn.resourcemanager.hostname namenode
+
+# 配置mapred-site.xml
+configure $HADOOP_CONF_DIR/mapred-site.xml mapred MAPRED_CONF
+# 这个变量要看下这是什么
+# addProperty $HADOOP_CONF_DIR/mapred-site.xml mapreduce.application.classpath $(mapred classpath)
+
+configure $HADOOP_CONF_DIR/httpfs-site.xml httpfs HTTPFS_CONF
+configure $HADOOP_CONF_DIR/kms-site.xml kms KMS_CONF
+
+
+# 修改网络
+if [ "$MULTIHOMED_NETWORK" = "1" ]; then
+    echo "Configuring for multihomed network"
+
+    # HDFS
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.rpc-bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.servicerpc-bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.http-bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.namenode.https-bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.client.use.datanode.hostname true
+    addProperty $HADOOP_CONF_DIR/hdfs-site.xml dfs.datanode.use.datanode.hostname true
+
+    # YARN
+    addProperty $HADOOP_CONF_DIR/yarn-site.xml yarn.resourcemanager.bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/yarn-site.xml yarn.nodemanager.bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/yarn-site.xml yarn.nodemanager.bind-host 0.0.0.0
+    addProperty $HADOOP_CONF_DIR/yarn-site.xml yarn.timeline-service.bind-host 0.0.0.0
+
+    # MAPRED
+    addProperty $HADOOP_CONF_DIR/mapred-site.xml yarn.nodemanager.bind-host 0.0.0.0
+fi
+
+if [ -n "$GANGLIA_HOST" ]; then
+    mv $HADOOP_CONF_DIR/hadoop-metrics.properties $HADOOP_CONF_DIR/hadoop-metrics.properties.orig
+    mv $HADOOP_CONF_DIR/hadoop-metrics2.properties $HADOOP_CONF_DIR/hadoop-metrics2.properties.orig
+
+    for module in mapred jvm rpc ugi; do
+        echo "$module.class=org.apache.hadoop.metrics.ganglia.GangliaContext31"
+        echo "$module.period=10"
+        echo "$module.servers=$GANGLIA_HOST:8649"
+    done > $HADOOP_CONF_DIR/hadoop-metrics.properties
+    
+    for module in namenode datanode resourcemanager nodemanager mrappmaster jobhistoryserver; do
+        echo "$module.sink.ganglia.class=org.apache.hadoop.metrics2.sink.ganglia.GangliaSink31"
+        echo "$module.sink.ganglia.period=10"
+        echo "$module.sink.ganglia.supportsparse=true"
+        echo "$module.sink.ganglia.slope=jvm.metrics.gcCount=zero,jvm.metrics.memHeapUsedM=both"
+        echo "$module.sink.ganglia.dmax=jvm.metrics.threadsBlocked=70,jvm.metrics.memHeapUsedM=40"
+        echo "$module.sink.ganglia.servers=$GANGLIA_HOST:8649"
+    done > $HADOOP_CONF_DIR/hadoop-metrics2.properties
+fi
+
+: <<'COMMENT'
+  根据不同的模块启动对应的服务
+  服务规划:
+    在docker-compose.yml 指定HADOOP_MODE:namenode datanode hive
+    namenode节点开启 hadoop的namenode和resourcemanager服务
+    datanode节点开启 hadoop的datanode和nodemanager服务
+    hive节点开启 hive服务
+COMMENT
+case $HADOOP_MODE in
+"namenode")
+  echo -e "\e[31mformat namenode...\e[0m"
+  yes n | hdfs namenode -format >/dev/null 2>&1
+  echo -e "\e[32mstart namenode...\e[0m"
+  hdfs --daemon start namenode
+  echo -e "\e[34mstart resource manager...\e[0m"
+  yarn --daemon start resourcemanager
+  ;;
+"datanode")
+  echo -e "\e[32mstart datanode (${NODE})...\e[0m"
+  hdfs --daemon start datanode
+  echo -e "\e[34mstart node manager (${NODE})...\e[0m"
+  yarn --daemon start nodemanager
+  ;;
+"hive")
+  echo -e "start hiveserver2"
+  hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1
+  ;;
+*)
+  echo "KHMT K18A"
+  ;;
+esac
+
+sleep infinity

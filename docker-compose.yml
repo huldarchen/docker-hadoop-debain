@@ -1,0 +1,57 @@
+version: '3'
+
+services:
+  # namenode节点
+  namenode:
+    build: .
+    image: huldarchen/hadoop-namenode:debian_x64
+    hostname: namenode
+    ports:
+      - 9870:9870
+      - 8088:8088
+      - 8983:8983
+    networks:
+      - hadoop
+    volumes:
+      - hadoop:/data/hadoop
+    environment:
+      HADOOP_MODE: namenode
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9870']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  datanode:
+    build: .
+    image: huldarchen/hadoop-datanode:debian_x64
+    networks:
+      - hadoop
+    volumes:
+      - hadoop:/data/hadoop
+    depends_on:
+      namenode:
+        condition: service_healthy
+    environment:
+      HADOOP_MODE: datanode
+  
+  mysql8:
+    image: mysql:8.0.33-debian
+    
+  hive:
+    build: .
+    image: huldarchen/hadoop-hive:debian_x64
+    networks:
+      - hadoop
+    depends_on:
+      - mysql8
+    environment:
+      - HADOOP_MODE=hive
+
+networks:
+  hadoop:
+
+
+volumes:
+  solr:
+  hadoop:
