@@ -40,7 +40,7 @@ export CORE_CONF_fs_defaultFS=${CORE_CONF_fs_defaultFS:-hdfs://$(hostname -f):80
 
 # dataNode
 readonly NODE
-  NODE=node-$(hostname -i | awk -F "." '{print $NF}' | awk '{print $1-2}')
+  NODE=$HADOOP_MODE-$(hostname -i | awk -F "." '{print $NF}' | awk '{print $1-2}')
 readonly HADOOP_CONF_DIR=/etc/hadoop
 readonly HDFS_CACHE_DIR=file://$HADOOP_DATA_DIR/$NODE
 
@@ -108,37 +108,3 @@ if [ -n "$GANGLIA_HOST" ]; then
         echo "$module.sink.ganglia.servers=$GANGLIA_HOST:8649"
     done > $HADOOP_CONF_DIR/hadoop-metrics2.properties
 fi
-
-: <<'COMMENT'
-  根据不同的模块启动对应的服务
-  服务规划:
-    在docker-compose.yml 指定HADOOP_MODE:namenode datanode hive
-    namenode节点开启 hadoop的namenode和resourcemanager服务
-    datanode节点开启 hadoop的datanode和nodemanager服务
-    hive节点开启 hive服务
-COMMENT
-case $HADOOP_MODE in
-"namenode")
-  echo -e "\e[31mformat namenode...\e[0m"
-  yes n | hdfs namenode -format >/dev/null 2>&1
-  echo -e "\e[32mstart namenode...\e[0m"
-  hdfs --daemon start namenode
-  echo -e "\e[34mstart resource manager...\e[0m"
-  yarn --daemon start resourcemanager
-  ;;
-"datanode")
-  echo -e "\e[32mstart datanode (${NODE})...\e[0m"
-  hdfs --daemon start datanode
-  echo -e "\e[34mstart node manager (${NODE})...\e[0m"
-  yarn --daemon start nodemanager
-  ;;
-"hive")
-  echo -e "start hiveserver2"
-  hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1
-  ;;
-*)
-  echo "KHMT K18A"
-  ;;
-esac
-
-sleep infinity

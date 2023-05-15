@@ -11,7 +11,7 @@ services:
       - 8088:8088
       - 8983:8983
     networks:
-      - hadoop
+      - hadoop-network
     volumes:
       - hadoop:/data/hadoop
     environment:
@@ -26,7 +26,7 @@ services:
     build: .
     image: huldarchen/hadoop-datanode:debian_x64
     networks:
-      - hadoop
+      - hadoop-network
     volumes:
       - hadoop:/data/hadoop
     depends_on:
@@ -36,13 +36,31 @@ services:
       HADOOP_MODE: datanode
   
   mysql8:
+    build: ./mysql
     image: mysql:8.0.33-debian
+    container_name: mysql8-hive
+    networks:
+      -hadoop-network
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: Pwd@root830
+      
+    command: 
+      - default-authentication-plugin=mysql_native_password
+      - character-set-server=utf8mb4
+      - collation-server=utf8mb4_general_ci
+      - explicit_defaults_for_timestamp=true
+      - lower_case_table_names=1
+    ports:
+      - 3310:3306
+    volumes:
+      - mysql8_data:/var/lib/mysql
     
   hive:
     build: .
     image: huldarchen/hadoop-hive:debian_x64
     networks:
-      - hadoop
+      - hadoop-network
     depends_on:
       - mysql8
     environment:

@@ -1,29 +1,6 @@
-version: '3.0'
+version: '2.0'
 
 services:
-
-  namenode:
-    build: .
-    image: huldarchen/hadoop-namenode:debian_x64
-    hostname: namenode
-    ports:
-      - 9870:9870
-      - 8088:8088
-      - 8983:8983
-      - 10000:10000
-      - 10002:10002
-    networks:
-      - hadoop
-    volumes:
-      - hadoop:/var/lib/hadoop-hdfs
-    environment:
-      HADOOP_MODE: namenode
-    healthcheck:
-      test: wget --quiet --tries=1 --spider http://localhost:9870
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
   mysql8:
     image: mysql:8.0.33-debian
     restart: always
@@ -33,7 +10,9 @@ services:
       - hadoop
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: Pwd@root830 
+      MYSQL_ROOT_PASSWORD: Pwd@root830
+      MYSQL_USER: hive
+      MYSQL_PASSWORD: Pwd@root830
     command: 
       - default-authentication-plugin=mysql_native_password
       - character-set-server=utf8mb4
@@ -43,13 +22,10 @@ services:
     ports:
       - 3310:3306
     volumes:
-      - mysql8_data:/var/lib/mysql
-      - mysql8_config:/etc/mysql/conf.d
-      - mysql8_init:/docker-entrypoint-initdb.d
+      - mysql8_test_data:/var/lib/mysql
+      - ./init/hive.sql:/docker-entrypoint-initdb.d
 
 
 
 volumes:
-  mysql8_data:
-  mysql8_config:
-  mysql8_init:
+  mysql8_test_data:

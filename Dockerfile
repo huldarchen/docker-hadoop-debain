@@ -61,6 +61,8 @@ ENV HADOOP_HOME=/opt/hadoop-$HADOOP_VERSION
 ENV HADOOP_CONF_DIR=/etc/hadoop
 ENV HADOOP_DATA_DIR=/data/hadoop
 
+VOLUME /data/hadoop
+
 # 5. 下载安装 hive
 ENV HIVE_HOME=/opt/hive-$HIVE_VERSION
 ENV HIVE_URL=https://mirrors.tuna.tsinghua.edu.cn/apache/hive/hive-$HIVE_VERSION/apache-hive-$HIVE_VERSION-bin.tar.gz
@@ -94,6 +96,9 @@ RUN if ! test -d $JAVA_HOME; then \
 ENV PATH=$HIVE_HOME/bin:$HADOOP_HOME/bin/:$PATH
 
 ADD entrypoint.sh  /entrypoint.sh
-RUN chmod a+x /entrypoint.sh 
+ADD ./start.sh /start.sh
+RUN chmod a+x /entrypoint.sh /start.sh
 
 ENTRYPOINT [ "/entrypoint.sh" ]
+
+CMD [ "/start.sh" ]
