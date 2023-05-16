@@ -30,6 +30,12 @@ case $HADOOP_MODE in
   yarn --daemon start nodemanager
   ;;
 "hive")
+  hadoop fs -mkdir       /tmp
+  hadoop fs -mkdir -p    /user/hive/warehouse
+  hadoop fs -chmod g+w   /tmp
+  hadoop fs -chmod g+w   /user/hive/warehouse
+
+  schematool -dbType mysql -initSchema --verbose
   echo -e "start hiveserver2"
   hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1
   ;;

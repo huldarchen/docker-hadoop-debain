@@ -2,30 +2,34 @@ version: '2.0'
 
 services:
   mysql8:
-    image: mysql:8.0.33-debian
+    build: ./
+    image: huldarchen/mysql:8.0.33
     restart: always
     container_name: mysql-8.0.33-debian
     hostname: mysql-8
     networks:
-      - hadoop
+      - mysql
     environment:
       TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: Pwd@root830
       MYSQL_USER: hive
       MYSQL_PASSWORD: Pwd@root830
     command: 
-      - default-authentication-plugin=mysql_native_password
-      - character-set-server=utf8mb4
-      - collation-server=utf8mb4_general_ci
-      - explicit_defaults_for_timestamp=true
-      - lower_case_table_names=1
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --explicit_defaults_for_timestamp=true
+      - --lower_case_table_names=1
     ports:
       - 3310:3306
     volumes:
       - mysql8_test_data:/var/lib/mysql
-      - ./init/hive.sql:/docker-entrypoint-initdb.d
+      - ./init:/docker-entrypoint-initdb.d
 
 
 
 volumes:
   mysql8_test_data:
+
+networks:
+  mysql:
