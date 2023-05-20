@@ -1,6 +1,11 @@
 FROM debian:11
 
 ENV USER=root
+
+ARG TZ
+
+ENV TZ=${TZ:-Asia/Shanghai}
+
 # 目录设计:
 # /opt : 工作目录 存放下载解压的hadoop hive文件
 # /etc : 存放配置文件,通过软连接的方式创建 有如下: /etc/hadoop /etc/hive
@@ -16,16 +21,26 @@ RUN sed -i s@/security.debian.org@/repo.huaweicloud.com/@g /etc/apt/sources.list
 # RUN sed -i "s@http://security.debian.org@https://repo.huaweicloud.com@g" /etc/apt/sources.list
 
 # 2. 安装必要依赖
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        openjdk-11-jdk \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        apt-transport-https \
+        wget \
+        gnupg \
         net-tools \
         curl \
         netcat \
-        gnupg \
         libsnappy-dev \
         libssl-dev \
         procps \
+    && wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | apt-key add - \
+    && echo "deb https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list \
+    && apt-get update \
+    && apt-get install -y temurin-8-jdk \
     && rm -rf /var/lib/apt/lists/* 
+
+
+RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && dpkg-reconfigure --frontend noninteractive tzdata
 
 
 RUN curl -fsSL https://dist.apache.org/repos/dist/release/hadoop/common/KEYS | gpg --import -
@@ -71,6 +86,11 @@ ENV HADOOP_DATA_DIR=/data/hadoop
 
 VOLUME /data/hadoop
 
+# hdfs namenode web端口
+EXPOSE 9870
+# resourcemanager web端口
+EXPOSE 8042
+
 # 5. 下载安装 hive
 ENV HIVE_HOME=/opt/hive-$HIVE_VERSION
 ENV HIVE_URL=https://repo.huaweicloud.com/apache/hive/hive-$HIVE_VERSION/apache-hive-$HIVE_VERSION-bin.tar.gz
@@ -83,7 +103,7 @@ RUN set -x \
     && rm /tmp/hive.tar.gz
 
 # hive文件管理
-RUN ln -s /opt/hadoop-$HADOOP_VERSION/conf /etc/hive
+RUN ln -s /opt/hive-$HIVE_VERSION/conf /etc/hive
 RUN ln -s /opt/hive-$HIVE_VERSION /opt/hive
 
 ADD conf/hive/hive-site.xml $HIVE_HOME/conf
@@ -94,9 +114,12 @@ ADD conf/hive/hive-log4j2.properties $HIVE_HOME/conf
 ADD conf/hive/ivysettings.xml $HIVE_HOME/conf
 ADD conf/hive/llap-daemon-log4j2.properties $HIVE_HOME/conf
 
+# hive端口
+EXPOSE 10000
+EXPOSE 10002
 
 # 6. 运行环境变量
-ENV JAVA_HOME=/usr/lib/jvm/default-java
+ENV JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64
 # create the symlink "/usr/lib/jvm/default-java" in case
 # it is not already there (cf. package "default-jre-headless")
 RUN if ! test -d $JAVA_HOME; then \
@@ -105,6 +128,10 @@ RUN if ! test -d $JAVA_HOME; then \
 ENV PATH=$HIVE_HOME/bin:$HADOOP_HOME/bin/:$PATH
 
 ADD entrypoint.sh  /entrypoint.sh
-RUN chmod a+x /entrypoint.sh
+ADD start.sh /start.sh
+
+RUN chmod a+x /entrypoint.sh /start.sh
 
 ENTRYPOINT [ "/entrypoint.sh" ]
+
+CMD [ "/start.sh" ]

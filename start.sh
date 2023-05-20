@@ -15,29 +15,44 @@ fi
     hive节点开启 hive服务
 COMMENT
 case $HADOOP_MODE in
+
 "namenode")
+
   echo -e "\e[31mformat namenode...\e[0m"
-  yes n | hdfs namenode -format >/dev/null 2>&1
+  yes n | hdfs namenode -format > /dev/null 2>&1
   echo -e "\e[32mstart namenode...\e[0m"
   hdfs --daemon start namenode
   echo -e "\e[34mstart resource manager...\e[0m"
   yarn --daemon start resourcemanager
   ;;
+
 "datanode")
   echo -e "\e[32mstart datanode (${NODE})...\e[0m"
   hdfs --daemon start datanode
   echo -e "\e[34mstart node manager (${NODE})...\e[0m"
   yarn --daemon start nodemanager
   ;;
-"hive")
-  hadoop fs -mkdir       /tmp
-  hadoop fs -mkdir -p    /user/hive/warehouse
-  hadoop fs -chmod g+w   /tmp
-  hadoop fs -chmod g+w   /user/hive/warehouse
 
-  schematool -dbType mysql -initSchema --verbose
+"hive")
+
+  hadoop fs -ls /tmp \
+  || hadoop fs -mkdir /tmp \
+  || hadoop fs -chmod g+w /tmp
+
+  hadoop fs -ls /user/hive/warehouse \
+   || hadoop fs -mkdir -p /user/hive/warehouse \
+   || hadoop fs -chmod g+w   /user/hive/warehouse
+  
+
+  schematool -dbType mysql -validate \
+  || schematool -dbType mysql -initSchema --verbose
+
+  echo -e "start metastore"
+  nohup hive --service metastore 2>&1 &
+
   echo -e "start hiveserver2"
-  hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1
+
+  nohup hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1 &
   ;;
 *)
   echo "KHMT K18A"

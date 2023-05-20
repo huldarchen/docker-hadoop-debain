@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-if [ -z "$HADOOP_MODE" ]; then
-    echo "HADOOP_MODE variable is not set. Exiting..."
-    exit 1
-fi
-
 function addProperty () {
   local path=$1
   local name=$2
@@ -13,7 +8,7 @@ function addProperty () {
   local entry="<property>\n\t<name>$name</name>\n\t<value>$value</value>\n</property>"
   local escapedEntry
   escapedEntry=$(echo "$entry" | sed 's/\//\\\//g')
-  sed -i "/<\/configuration>/ s/.*/""$escapedEntry//&/\\&""\n<\/configuration>/" "$path"
+  sed -i "/<\/configuration>/ s/.*/${escapedEntry//&/\\&amp;}\n<\/configuration>/" "$path"
 }
 
 # 通过env_file来设置变量 参数: 要配置的文件路径 要配置的模块 env环境变量前缀
@@ -40,6 +35,7 @@ export CORE_CONF_fs_defaultFS=${CORE_CONF_fs_defaultFS:-hdfs://$(hostname -f):80
 # dataNode
 readonly NODE=$HADOOP_MODE-$(hostname -i | awk -F "." '{print $NF}' | awk '{print $1-2}')
 readonly HADOOP_CONF_DIR=/etc/hadoop
+readonly HIVE_CONF_DIR=/etc/hive
 readonly HDFS_CACHE_DIR=file://$HADOOP_DATA_DIR/$NODE
 
 # 配置 core-site.xml
@@ -108,52 +104,7 @@ if [ -n "$GANGLIA_HOST" ]; then
     done > $HADOOP_CONF_DIR/hadoop-metrics2.properties
 fi
 
-configure /opt/hive/conf/hive-site.xml hive HIVE_SITE_CONF
-
-
-if [ -z "$HADOOP_MODE" ]; then
-    echo "HADOOP_MODE variable is not set. Exiting..."
-    exit 1
-fi
-
-
-: <<'COMMENT'
-  根据不同的模块启动对应的服务
-  服务规划:
-    在docker-compose.yml 指定HADOOP_MODE:namenode datanode hive
-    namenode节点开启 hadoop的namenode和resourcemanager服务
-    datanode节点开启 hadoop的datanode和nodemanager服务
-    hive节点开启 hive服务
-COMMENT
-case $HADOOP_MODE in
-"namenode")
-  echo -e "\e[31mformat namenode...\e[0m"
-  yes n | hdfs namenode -format >/dev/null 2>&1
-  echo -e "\e[32mstart namenode...\e[0m"
-  hdfs --daemon start namenode
-  echo -e "\e[34mstart resource manager...\e[0m"
-  yarn --daemon start resourcemanager
-  ;;
-"datanode")
-  echo -e "\e[32mstart datanode (${NODE})...\e[0m"
-  hdfs --daemon start datanode
-  echo -e "\e[34mstart node manager (${NODE})...\e[0m"
-  yarn --daemon start nodemanager
-  ;;
-"hive")
-  hadoop fs -mkdir       /tmp
-  hadoop fs -mkdir -p    /user/hive/warehouse
-  hadoop fs -chmod g+w   /tmp
-  hadoop fs -chmod g+w   /user/hive/warehouse
-
-  schematool -dbType mysql -initSchema --verbose
-  echo -e "start hiveserver2"
-  hiveserver2 -hiveconf hive.server2.authentication=nosasl -hiveconf hive.server2.enable.doAs=false >/dev/null 2>&1
-  ;;
-*)
-  echo "KHMT K18A"
-  ;;
-esac
+configure $HIVE_CONF_DIR/hive-site.xml hive HIVE_SITE_CONF
 
 # 等待应用程序 用来保证启动的顺序
 function wait_for_it()
@@ -165,30 +116,31 @@ function wait_for_it()
     local max_try=100
     let i=1
 
-    nc -z "$service" "$port"
+    nc -z $service $port
+    
     result=$?
 
     until [ $result -eq 0 ]; do
-      echo "[$i/$max_try] check for $service:$port..."
-      echo "[$i/$max_try] $service:$port is not available yet"
+      echo "[$i/$max_try] check for ${service}:${port}..."
+      echo "[$i/$max_try] ${service}:${port} is not available yet"
       if (( $i == $max_try )); then
-        echo "[$i/$max_try] $service:$port is still not available; giving up after $max_try tries. :/"
+        echo "[$i/$max_try] ${service}:${port} is still not available; giving up after ${max_try} tries. :/"
         exit 1
       fi
       
       echo "[$i/$max_try] try in ${retry_seconds}s once again ..."
-      (("i++")) || true
+      let "i++"
       sleep $retry_seconds
 
-      nc -z "$service" "$port"
+      nc -z $service $port
       result=$?
     done
-    echo "[$i/$max_try] $service:$port is available."
+    echo "[$i/$max_try] $service:${port} is available."
 }
 
-for i in "${SERVICE_PRECONDITION[@]}"
+for i in ${SERVICE_PRECONDITION[@]}
 do
-    wait_for_it "$i"
+    wait_for_it ${i}
 done
 
-exec "$@"
+exec $@
